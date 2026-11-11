@@ -40,14 +40,30 @@ public struct KeyFunction: Hashable, Sendable, Identifiable {
     var bytes: [UInt8] { [side, button, action, function] }
 }
 
+/// A phone, tablet or computer the earbuds know about. The list includes pairing history;
+/// only hosts with `isConnected` are connected right now.
 public struct ConnectedHost: Equatable, Sendable, Identifiable {
+    /// Address with the byte order reversed from the wire (correct for most earbuds).
     public var address: String
+    /// Address in wire byte order (correct for some models; see `BudsDevice.normalizeHosts`).
+    public var addressAsSent: String
     public var name: String
+    /// Android-style connection state: 0 disconnected, 1 connecting, 2 connected, 3 disconnecting.
     public var state: UInt8
     public var flags: UInt8
     public var id: String { address }
-    /// Per-host flag bits reported by the earbuds (bit0 = active).
-    public var isActive: Bool { flags & 0x01 != 0 }
+
+    public var isConnected: Bool { state == 2 }
+    /// The host this app is running on (the earbuds mark the device they're talking to).
+    public var isThisDevice: Bool { flags & 0x01 != 0 }
+    public var isMainAudioDevice: Bool { flags & 0x02 != 0 }
+    public var isAudioActive: Bool { flags & 0x04 != 0 }
+}
+
+/// Which battery components the device reports, and how to label them.
+public extension Array where Element == BatteryLevel {
+    /// True when the device reports a single battery (neckbands, headphones).
+    var isSingleBattery: Bool { count == 1 }
 }
 
 public struct FirmwareVersion: Equatable, Sendable {
@@ -108,22 +124,27 @@ public enum GestureCatalog {
     static let callCodes: Set<UInt8> = [0, 28, 29]
     static let mediaCodes: Set<UInt8> = [0, 1, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 17]
 
-    /// Functions to offer for a slot. Slots that already hold a call function get call
-    /// options, everything else gets media options. The slot's current value is always included.
-    public static func options(for slot: KeyFunction, legacy: Bool, showAll: Bool) -> [GestureFunction] {
-        let all = all(legacy: legacy)
-        if showAll { return ensuring(slot.function, in: all) }
-        let isCallSlot = slot.function == 28 || slot.function == 29
-        let allowed = isCallSlot ? callCodes : mediaCodes
-        return ensuring(slot.function, in: all.filter { allowed.contains($0.code) })
+    /// True when a gesture group is the in-call set (any of its slots holds a call function).
+    public static func isCallGroup(_ slots: [KeyFunction]) -> Bool {
+        slots.contains { $0.function == 28 || $0.function == 29 }
+    }
+
+    /// Functions to offer for a slot, split into the ones that fit its context (calls or media)
+    /// and everything else. The earbuds don't report which functions each slot accepts, so the
+    /// second group may contain functions a model rejects. The current value is always included.
+    public static func options(for slot: KeyFunction, callGroup: Bool, legacy: Bool)
+        -> (suggested: [GestureFunction], more: [GestureFunction]) {
+        let allowed = callGroup ? callCodes : mediaCodes
+        var all = all(legacy: legacy)
+        if !all.contains(where: { $0.code == slot.function }) {
+            all.append(GestureFunction(code: slot.function, title: "Function \(slot.function)"))
+        }
+        let suggested = all.filter { allowed.contains($0.code) || $0.code == slot.function }
+        let more = all.filter { !suggested.contains($0) }
+        return (suggested, more)
     }
 
     public static func title(for code: UInt8, legacy: Bool) -> String {
         all(legacy: legacy).first { $0.code == code }?.title ?? "Function \(code)"
-    }
-
-    private static func ensuring(_ code: UInt8, in list: [GestureFunction]) -> [GestureFunction] {
-        if list.contains(where: { $0.code == code }) { return list }
-        return (list + [GestureFunction(code: code, title: "Function \(code)")]).sorted { $0.code < $1.code }
     }
 }

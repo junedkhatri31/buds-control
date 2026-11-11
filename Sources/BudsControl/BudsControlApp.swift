@@ -3,6 +3,7 @@ import BudsKit
 
 @main
 struct BudsControlApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var manager = BudsManager()
 
     init() {
@@ -27,10 +28,10 @@ struct BudsControlApp: App {
         Window("Buds Control", id: "main") {
             MainView()
                 .environment(manager)
-                .frame(minWidth: 520, minHeight: 560)
+                .frame(minWidth: 720, minHeight: 520)
                 .task { manager.start() }
         }
-        .defaultSize(width: 600, height: 1100)
+        .defaultSize(width: 860, height: 900)
         .windowResizability(.contentMinSize)
 
         // Debug aid (`--preview-menu`): the menu-bar popover's content in a normal window.
@@ -49,6 +50,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         label.task {
+            AppDelegate.openWindow = openWindow
             if CommandLine.arguments.contains("--show-window") {
                 openWindow(id: "main")
                 NSApp.activate()

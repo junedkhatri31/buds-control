@@ -49,19 +49,28 @@ The response is `status, bitmap…`. Bit *i* (LSB-first across bytes) enables th
 | cmd | name | request payload | response payload (after status) |
 |---|---|---|---|
 | 0x0105 | get version | – | `n`, then ASCII CSV of `n` triples `type,kind,ver` **[observed]** `03` + `1,2,112,2,2,112,3,2,101` |
-| 0x0106 | get battery | – | `n, (type, level)×n`; level bit7 = charging, bits0-6 = %; type 1=L 2=R 3=case **[observed]** |
+| 0x0106 | get battery | – | `n, (type, level)×n`; level bit7 = charging, bits0-6 = %; type 1=L 2=R 3=case. Neckbands report a single entry (type 1) **[observed]** |
 | 0x0108 | get key functions | – | `n, (type, button, action, function)×n` **[observed]** 24 entries |
 | 0x0109 | get ear status | – | `n, (type, flags)×n`; in-case = bit0 **clear**, in-ear = bit1, lid-closed = bit2 **clear** **[observed]** |
 | 0x010D | get feature switches | `n, featureId×n` | `n, (featureId, on)×n` **[observed]** |
-| 0x0112 | get multi-connect hosts | – | `n, entry×n`; entry = `mac[6] (reversed), len, state, flags, nameLen, name…` (`len` counts the bytes after itself) **[observed]** |
+| 0x0112 | get multi-connect hosts | – | `n, entry×n`; entry = `mac[6], len, state, flags, nameLen, name…` (`len` counts the bytes after itself). See [Hosts](#hosts-0x0112--event-6) **[observed]** |
 | 0x0401 | set key functions | `n, (type, button, action, function)×n` | – **[observed]** |
 | 0x0403 | set feature switch | `featureId, on(0/1)` | – **[observed]** |
 | 0x0200 | get notification events | – | `n, eventId×n` |
 | 0x0205 | subscribe to events | `n, eventId×n` | – (fallback 0x0201 `eventId`, one per event) |
-| 0x0204 | **device event** | – | `eventId, data…`: 1 = battery (as 0x0106), 2 = ear status (as 0x0109) |
+| 0x0204 | **device event** | – | `eventId, data…`: 1 = battery (as 0x0106), 2 = ear status (as 0x0109), 6 = hosts (as 0x0112), 0xF2 = pairing history. **[observed]** both test devices list event 6 |
 | 0x0500 | **device asks UTC time** | – | host replies `0x8500` same seq: `00, epochSeconds:u32le` **[observed request]** |
 | 0x0503 | **feature switch sync** | – | `n, (featureId, on)×n` |
 | 0x0507 | **multi-connect changed** | – | re-read 0x0112 |
+
+### Hosts (0x0112 / event 6)
+The list holds **every host the device has paired with**, not just connected ones.
+* `state`: Android connection state. 0 disconnected, 1 connecting, **2 connected**, 3 disconnecting.
+* `flags`: bit0 = the host asking (this Mac), bit1 = main audio device, bit2 = audio active,
+  bits3-5 = device type.
+* MAC byte order **varies by model** **[observed]**: Nord Buds 3r sends it reversed, realme Buds
+  Wireless 3 sends it as-is. Match the bit0 entry against the host's own address to pick the order.
+* Names may be truncated by the device (e.g. 20 bytes on realme Buds Wireless 3).
 
 ### Feature IDs (0x010D / 0x0403)
 4 wear detection · 6 game mode · 9 vocal enhance · 15 zen mode · **17 dual connection (multipoint)** ·
@@ -69,6 +78,8 @@ The response is `status, bitmap…`. Bit *i* (LSB-first across bytes) enables th
 28 auto volume · 29 bass engine · 48 adaptive volume · 55 swift pair.
 **[observed]** The Nord Buds 3r reports feature 17 = 1 (dual connection on). The earbuds echo
 every requested ID, supported or not, so gate multipoint on capability command 0x0112 instead.
+That isn't conclusive either: realme Buds Wireless 3 also reports 0x0112, accepts feature 17 and
+reads it back. Whether a model really does multipoint isn't reported by the device.
 
 ### Key functions (gestures)
 * `type`: 1 left, 2 right.

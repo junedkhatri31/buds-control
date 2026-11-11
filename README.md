@@ -27,13 +27,18 @@ earbuds automatically and links up whenever they connect. Allow Bluetooth access
 
 ## Features
 
-- **Battery:** left, right and case levels, with charging and in-ear/in-case status. Updates live,
-  and the lowest earbud level shows next to the menu-bar icon.
-- **Dual connection:** turn multipoint on or off, and see which devices the earbuds are connected to.
+- **Battery:** left, right and case levels for earbuds, or a single level for neckbands, with
+  charging and in-ear/in-case status. Updates live, and the lowest level shows next to the
+  menu-bar icon.
+- **Dual connection:** turn multipoint on or off, and see which phones and computers are connected
+  right now. The list updates as devices connect and disconnect.
 - **Gestures:** change what single, double and triple taps, holds, slides or squeezes do on each
-  earbud, including the separate in-call gestures. Choose **Show all functions** for the full list.
-- **Firmware versions** for each earbud and the case.
-- Settings window (**⌘,**) with everything above, plus a manual refresh.
+  earbud, including the separate in-call gestures. Each menu lists the usual functions first, then
+  the rest under **More functions**.
+- **Firmware versions** for each component.
+- **Several devices at once:** the menu bar shows every connected device; the Settings window
+  (**⌘,**) has a sidebar to switch between them.
+- Shows in the Dock and ⌘-Tab. Turn **Show in Dock** off under **General** to keep it in the menu bar only.
 
 ## Compatibility
 
@@ -42,7 +47,8 @@ doesn't keep a model list. It asks the earbuds which features they support and s
 The gesture list comes from the slots the earbuds report, so different layouts (taps, squeezes,
 slides, middle buttons) all work.
 
-Tested on **OnePlus Nord Buds 3r**. Other models should work, and reports are welcome in
+Tested on **OnePlus Nord Buds 3r** (earbuds) and **realme Buds Wireless 3** (neckband). Other
+models should work, and reports are welcome in
 [issues](https://github.com/junedkhatri31/buds-control/issues). The earbuds don't say which functions
 each gesture accepts, so the app offers sensible defaults. If the earbuds reject a choice, the app
 shows an error and restores the current setting.
@@ -66,6 +72,8 @@ Pass these after `--args` when opening the app:
 * `--selftest`: connects, prints everything it reads, runs reversible writes, then exits.
 * `--show-window`: opens the settings window at launch.
 * `--preview-menu`: shows the menu-bar popover's content in a normal window.
+* `--select <name>`: selects the first device whose name contains `<name>` in the settings window.
+* `--log-packets`: prints events and other packets the device sends on its own.
 * `--snapshot <dir>`: writes PNGs of the app's windows after 8 s, then exits.
 
 ```bash

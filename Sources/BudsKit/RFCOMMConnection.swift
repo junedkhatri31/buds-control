@@ -145,8 +145,26 @@ final class RFCOMMConnection: NSObject, IOBluetoothRFCOMMChannelDelegate {
             if packet.isResponse, let entry = pending[packet.sequence], entry.command == packet.baseCommand {
                 resolve(packet.sequence, with: .success(packet.payload))
             } else {
+                PacketLog.packet("RX unsolicited", packet)
                 onPacket?(packet)
             }
         }
+    }
+}
+
+/// Debug logging enabled with the `--log-packets` launch argument.
+enum PacketLog {
+    static let enabled = ProcessInfo.processInfo.arguments.contains("--log-packets")
+
+    static func note(_ message: @autoclosure () -> String) {
+        guard enabled else { return }
+        let stamp = Date().formatted(.dateTime.hour().minute().second())
+        print("[\(stamp)] \(message())")
+        fflush(stdout)
+    }
+
+    static func packet(_ label: String, _ p: Packet) {
+        note(String(format: "%@ cmd=0x%04X seq=%d ", label, p.command, p.sequence)
+             + p.payload.map { String(format: "%02X", $0) }.joined(separator: " "))
     }
 }

@@ -63,7 +63,9 @@ final class ProtocolTests: XCTestCase {
             "02 66 55 44 33 22 11 0A 02 00 07 50 69 78 65 6C 20 38 FF EE DD CC BB AA 11 02 01 0E 4D 79 20 4D 61 63 42 6F 6F 6B 20 50 72 6F"))
         XCTAssertEqual(hosts.map(\.name), ["Pixel 8", "My MacBook Pro"])
         XCTAssertEqual(hosts.map(\.address), ["11:22:33:44:55:66", "AA:BB:CC:DD:EE:FF"])
-        XCTAssertEqual(hosts.map(\.isActive), [false, true])
+        XCTAssertEqual(hosts.map(\.isThisDevice), [false, true])
+        XCTAssertEqual(hosts.map(\.isConnected), [true, true])
+        XCTAssertEqual(hosts.first?.addressAsSent, "66:55:44:33:22:11")
     }
 
     func testVersions() {

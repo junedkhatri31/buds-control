@@ -33,13 +33,15 @@ public enum Parse {
         var o = 1
         for _ in 0..<n {
             guard o + 10 <= d.count else { break }
-            let mac = d[o..<o + 6].reversed().map { String(format: "%02X", $0) }.joined(separator: ":")
+            let wire = d[o..<o + 6].map { String(format: "%02X", $0) }
+            let mac = wire.reversed().joined(separator: ":")
             let entryLen = Int(d[o + 6]), state = d[o + 7], flags = d[o + 8], nameLen = Int(d[o + 9])
             let nameStart = o + 10
             guard nameStart + nameLen <= d.count else { break }
             let name = String(decoding: d[nameStart..<nameStart + nameLen], as: UTF8.self)
             if mac != "00:00:00:00:00:00" {
-                hosts.append(ConnectedHost(address: mac, name: name, state: state, flags: flags))
+                hosts.append(ConnectedHost(address: mac, addressAsSent: wire.joined(separator: ":"),
+                                           name: name, state: state, flags: flags))
             }
             o = nameStart + nameLen + max(0, entryLen - nameLen - 3)
         }

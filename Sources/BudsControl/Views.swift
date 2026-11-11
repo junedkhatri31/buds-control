@@ -7,19 +7,29 @@ struct MenuBarView: View {
     @Environment(BudsManager.self) private var manager
     @Environment(\.openWindow) private var openWindow
 
+    /// Every linked device, or the most relevant one when none is linked yet.
+    private var shown: [BudsDevice] {
+        let linked = manager.devices.filter { $0.linkState == .connected }
+        if !linked.isEmpty { return linked }
+        return manager.selected.map { [$0] } ?? []
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let device = manager.selected {
-                DeviceHeader(device: device)
-                if device.linkState == .connected {
-                    BatteryRow(device: device)
-                    if device.supportsDualConnection {
-                        Divider()
-                        DualConnectionToggle(device: device)
+            if shown.isEmpty {
+                EmptyStateView()
+            }
+            ForEach(Array(shown.enumerated()), id: \.element.id) { index, device in
+                if index > 0 { Divider() }
+                VStack(alignment: .leading, spacing: 12) {
+                    DeviceHeader(device: device, compact: true)
+                    if device.linkState == .connected {
+                        BatteryRow(device: device)
+                        if device.supportsDualConnection {
+                            DualConnectionToggle(device: device)
+                        }
                     }
                 }
-            } else {
-                EmptyStateView()
             }
             Divider()
             VStack(spacing: 0) {
@@ -68,70 +78,173 @@ struct MenuRowButtonStyle: ButtonStyle {
     }
 }
 
-// MARK: - Main window
+// MARK: - Settings window
+
+enum SidebarItem: Hashable {
+    case device(String)
+    case general
+}
 
 struct MainView: View {
     @Environment(BudsManager.self) private var manager
+    @State private var selection: SidebarItem?
 
     var body: some View {
-        @Bindable var manager = manager
-        Group {
-            if let device = manager.selected {
-                Form {
-                    Section {
-                        DeviceHeader(device: device)
-                        if manager.devices.count > 1 {
-                            Picker("Earbuds", selection: Binding(get: { device.id }, set: { manager.selectedID = $0 })) {
-                                ForEach(manager.devices) { Text($0.name).tag($0.id) }
-                            }
-                        }
-                    }
-                    if device.linkState == .connected {
-                        Section("Battery") { BatteryRow(device: device) }
-                        if device.supportsDualConnection {
-                            Section("Dual connection") {
-                                DualConnectionToggle(device: device)
-                                ForEach(device.hosts) { host in
-                                    HStack {
-                                        Image(systemName: "laptopcomputer.and.iphone")
-                                            .foregroundStyle(.secondary)
-                                        Text(host.name.isEmpty ? host.address : host.name)
-                                        Spacer()
-                                        Text(host.address).font(.caption.monospaced()).foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                        if device.supports(Command.getKeyFunction) && !device.keyFunctions.isEmpty {
-                            GesturesSection(device: device)
-                        }
-                        if !device.versions.isEmpty {
-                            Section("Firmware") {
-                                ForEach(Array(device.versions.enumerated()), id: \.offset) { _, v in
-                                    LabeledContent(BudSide(rawValue: UInt8(clamping: v.side))?.title ?? "Component \(v.side)",
-                                                   value: v.version)
-                                }
-                            }
-                        }
+        NavigationSplitView {
+            List(selection: $selection) {
+                Section("Devices") {
+                    ForEach(manager.devices) { device in
+                        DeviceSidebarRow(device: device)
+                            .tag(SidebarItem.device(device.id))
                     }
                 }
-                .formStyle(.grouped)
-            } else {
+                Section {
+                    Label("General", systemImage: "gearshape")
+                        .tag(SidebarItem.general)
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 230)
+            .overlay {
+                if manager.devices.isEmpty {
+                    Text("No devices").foregroundStyle(.secondary)
+                }
+            }
+        } detail: {
+            switch selection {
+            case .device(let id):
+                if let device = manager.devices.first(where: { $0.id == id }) {
+                    DevicePage(device: device)
+                } else {
+                    EmptyStateView().padding(40)
+                }
+            case .general:
+                GeneralPage()
+            case nil:
                 EmptyStateView().padding(40)
             }
         }
-        .toolbar {
-            if let device = manager.selected, device.linkState == .connected {
-                Button {
-                    Task { await device.refreshAll() }
-                } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                .disabled(device.busy)
+        .onAppear(perform: selectDefault)
+        .onChange(of: manager.devices.map(\.id)) { selectDefault() }
+        .onChange(of: selection) {
+            if case .device(let id) = selection { manager.selectedID = id }
+        }
+    }
+
+    private func selectDefault() {
+        // Debug aid: `--select <name substring>` picks a device at launch (used for screenshots).
+        let args = CommandLine.arguments
+        if selection == nil, let i = args.firstIndex(of: "--select"), i + 1 < args.count,
+           let match = manager.devices.first(where: { $0.name.localizedCaseInsensitiveContains(args[i + 1]) }) {
+            selection = .device(match.id)
+            return
+        }
+        if case .device(let id) = selection, manager.devices.contains(where: { $0.id == id }) { return }
+        if selection == .general { return }
+        selection = manager.selected.map { .device($0.id) }
+    }
+}
+
+struct DeviceSidebarRow: View {
+    let device: BudsDevice
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(device.name).lineLimit(1)
+                Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
+        } icon: {
+            Image(systemName: device.symbolName)
+        }
+    }
+
+    private var summary: String {
+        switch device.linkState {
+        case .connected:
+            let levels = device.batteryComponents.filter { $0.side != BudSide.caseBox.rawValue && $0.percent > 0 }
+            if let low = levels.map(\.percent).min() { return "Connected · \(low)%" }
+            return "Connected"
+        case .connecting: return "Connecting…"
+        case .disconnected, .failed: return device.isBluetoothConnected ? "Not linked" : "Not connected"
         }
     }
 }
 
+struct DevicePage: View {
+    let device: BudsDevice
+
+    var body: some View {
+        Form {
+            Section { DeviceHeader(device: device, compact: false) }
+            if device.linkState == .connected {
+                if !device.battery.isEmpty {
+                    Section("Battery") { BatteryRow(device: device) }
+                }
+                if device.supportsDualConnection {
+                    DualConnectionSection(device: device)
+                }
+                if device.supports(Command.getKeyFunction) && !device.keyFunctions.isEmpty {
+                    GesturesSection(device: device)
+                }
+                if !device.versions.isEmpty {
+                    Section("Firmware") {
+                        ForEach(Array(device.versions.enumerated()), id: \.offset) { _, v in
+                            LabeledContent(device.versions.count == 1 ? "Version" : componentTitle(v.side),
+                                           value: v.version)
+                        }
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle(device.name)
+        .toolbar {
+            if device.linkState == .connected {
+                Button {
+                    Task { await device.refreshAll() }
+                } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                .help("Read everything from the device again")
+                .disabled(device.busy)
+            }
+        }
+        // Keep the connected-device list fresh while this page is open.
+        .onAppear { device.setLiveUpdates(true) }
+        .onDisappear { device.setLiveUpdates(false) }
+        .id(device.id)
+    }
+
+    private func componentTitle(_ side: Int) -> String {
+        BudSide(rawValue: UInt8(clamping: side))?.title ?? "Component \(side)"
+    }
+}
+
+struct GeneralPage: View {
+    @AppStorage(AppDelegate.showInDockKey) private var showInDock = true
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: $showInDock) {
+                    Text("Show in Dock")
+                    Text("Turn off to keep Buds Control only in the menu bar.")
+                }
+                .onChange(of: showInDock) { AppDelegate.applyDockPreference() }
+            }
+            Section {
+                LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–")
+            }
+        }
+        .formStyle(.grouped)
+        .navigationTitle("General")
+    }
+}
+
 // MARK: - Components
+
+extension BudsDevice {
+    /// Earbuds with a case get an earbuds symbol; single-battery devices (neckbands) get headphones.
+    var symbolName: String { battery.isSingleBattery ? "headphones" : "earbuds" }
+}
 
 struct EmptyStateView: View {
     @Environment(BudsManager.self) private var manager
@@ -150,12 +263,16 @@ struct EmptyStateView: View {
 
 struct DeviceHeader: View {
     let device: BudsDevice
+    let compact: Bool
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "earbuds.case.fill").font(.title2).foregroundStyle(.tint)
+            Image(systemName: device.symbolName)
+                .font(compact ? .title3 : .largeTitle)
+                .foregroundStyle(.tint)
+                .frame(width: compact ? 28 : 44)
             VStack(alignment: .leading, spacing: 2) {
-                Text(device.name).font(.headline)
+                Text(device.name).font(compact ? .headline : .title3.bold())
                 Text(statusText).font(.caption).foregroundStyle(statusColor)
             }
             Spacer()
@@ -189,54 +306,63 @@ struct DeviceHeader: View {
     }
 }
 
+/// One gauge per battery the device reports: left/right/case for earbuds, one for neckbands.
 struct BatteryRow: View {
     let device: BudsDevice
 
     var body: some View {
+        let parts = device.batteryComponents
         HStack(alignment: .top, spacing: 0) {
-            ForEach(BudSide.allCases, id: \.self) { side in
-                BatteryGauge(side: side, level: device.battery(for: side), status: device.status(for: side))
+            ForEach(parts, id: \.side) { level in
+                BatteryGauge(title: title(for: level.side, single: parts.count == 1),
+                             level: level,
+                             caption: caption(for: level.side))
                     .frame(maxWidth: .infinity)
             }
         }
     }
+
+    private func title(for side: UInt8, single: Bool) -> String {
+        if single { return "Battery" }
+        return BudSide(rawValue: side)?.title ?? "Battery \(side)"
+    }
+
+    private func caption(for side: UInt8) -> String? {
+        guard side != BudSide.caseBox.rawValue, device.battery.count > 1,
+              let status = device.status(for: BudSide(rawValue: side) ?? .left) else { return nil }
+        if status.inEar { return "In ear" }
+        if status.inCase { return "In case" }
+        return nil
+    }
 }
 
 struct BatteryGauge: View {
-    let side: BudSide
-    let level: BatteryLevel?
-    let status: EarStatus?
+    let title: String
+    let level: BatteryLevel
+    let caption: String?
 
     var body: some View {
-        // The case reports 0 % when it can't be measured (e.g. both buds are out of it).
-        let known = level.map { $0.percent > 0 || $0.charging } ?? false
-        let percent = known ? level!.percent : 0
+        // A case reports 0 % when it can't be measured (e.g. both buds are out of it).
+        let known = level.percent > 0 || level.charging
         VStack(spacing: 6) {
-            Gauge(value: Double(percent), in: 0...100) {
+            Gauge(value: Double(level.percent), in: 0...100) {
                 EmptyView()
             } currentValueLabel: {
-                if level?.charging == true {
+                if level.charging {
                     Image(systemName: "bolt.fill")
                 } else {
-                    Text(known ? "\(percent)" : "–")
+                    Text(known ? "\(level.percent)" : "–")
                 }
             }
             .gaugeStyle(.accessoryCircularCapacity)
-            .tint(!known ? .secondary : percent <= 20 ? .red : .green)
-            Text(side.title).font(.caption)
+            .tint(!known ? .secondary : level.percent <= 20 ? .red : .green)
+            Text(title).font(.caption)
             if let caption {
                 Text(caption).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(side.title) battery \(known ? "\(percent) percent" : "unknown")\(level?.charging == true ? ", charging" : "")")
-    }
-
-    private var caption: String? {
-        guard side != .caseBox, let status else { return nil }
-        if status.inEar { return "In ear" }
-        if status.inCase { return "In case" }
-        return nil
+        .accessibilityLabel("\(title) \(known ? "\(level.percent) percent" : "unknown")\(level.charging ? ", charging" : "")")
     }
 }
 
@@ -258,37 +384,72 @@ struct DualConnectionToggle: View {
     }
 }
 
+struct DualConnectionSection: View {
+    let device: BudsDevice
+
+    var body: some View {
+        Section {
+            DualConnectionToggle(device: device)
+        } header: {
+            Text("Dual connection")
+        }
+        Section {
+            if device.connectedHosts.isEmpty {
+                Text("None").foregroundStyle(.secondary)
+            }
+            ForEach(device.connectedHosts) { host in
+                HStack(spacing: 10) {
+                    Image(systemName: host.isThisDevice ? "laptopcomputer" : "iphone")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    Text(host.name.isEmpty ? "Unnamed device" : host.name)
+                    if host.isThisDevice {
+                        Text("This Mac")
+                            .font(.caption)
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(.quaternary, in: Capsule())
+                    }
+                    Spacer()
+                    if host.isAudioActive {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .foregroundStyle(.secondary)
+                            .help("Playing audio")
+                    }
+                }
+                .help(host.address)
+            }
+        } header: {
+            Text("Connected now")
+        }
+    }
+}
+
 struct GesturesSection: View {
     let device: BudsDevice
-    @AppStorage("showAllGestureFunctions") private var showAll = false
 
     var body: some View {
         let buttons = Array(Set(device.keyFunctions.map(\.button))).sorted()
+        // Only label left/right when the device has gestures on both sides.
+        let sides = Set(device.keyFunctions.map(\.side))
         ForEach(buttons, id: \.self) { button in
             let slots = device.keyFunctions.filter { $0.button == button }
+            let callGroup = GestureCatalog.isCallGroup(slots)
             let actions = Array(Set(slots.map(\.action))).sorted()
             Section {
                 ForEach(actions, id: \.self) { action in
-                    GestureRow(device: device, action: action,
-                               left: slots.first { $0.action == action && $0.side == BudSide.left.rawValue },
-                               right: slots.first { $0.action == action && $0.side == BudSide.right.rawValue },
-                               showAll: showAll)
+                    let row = slots.filter { $0.action == action }.sorted { $0.side < $1.side }
+                    GestureRow(device: device, action: action, slots: row,
+                               showSides: sides.count > 1, callGroup: callGroup)
                 }
             } header: {
-                Text(title(forButton: button, slots: slots))
-            }
-        }
-        Section {
-            Toggle(isOn: $showAll) {
-                Text("Show all functions")
-                Text("Offer every known function. Some earbuds reject functions they don't have.")
+                Text(title(forButton: button, callGroup: callGroup))
             }
         }
     }
 
     /// Button IDs are model-specific; name a group from what its slots do.
-    private func title(forButton button: UInt8, slots: [KeyFunction]) -> String {
-        if slots.contains(where: { $0.function == 28 || $0.function == 29 }) { return "Gestures during calls" }
+    private func title(forButton button: UInt8, callGroup: Bool) -> String {
+        if callGroup { return "Gestures during calls" }
         switch button {
         case 1: return "Gestures"
         case 2: return "Volume up button"
@@ -302,28 +463,35 @@ struct GesturesSection: View {
 struct GestureRow: View {
     let device: BudsDevice
     let action: UInt8
-    let left: KeyFunction?
-    let right: KeyFunction?
-    let showAll: Bool
+    let slots: [KeyFunction]
+    let showSides: Bool
+    let callGroup: Bool
 
     var body: some View {
         LabeledContent(GestureAction.title(action)) {
-            HStack(spacing: 8) {
-                if let left { picker(for: left, label: "L") }
-                if let right { picker(for: right, label: "R") }
+            HStack(spacing: 12) {
+                ForEach(slots) { slot in picker(for: slot) }
             }
         }
     }
 
-    private func picker(for slot: KeyFunction, label: String) -> some View {
-        let options = GestureCatalog.options(for: slot, legacy: device.usesLegacyTrackCodes, showAll: showAll)
+    private func picker(for slot: KeyFunction) -> some View {
+        let options = GestureCatalog.options(for: slot, callGroup: callGroup, legacy: device.usesLegacyTrackCodes)
+        let side = slot.side == BudSide.left.rawValue ? "L" : slot.side == BudSide.right.rawValue ? "R" : "\(slot.side)"
         return HStack(spacing: 4) {
-            Text(label).font(.caption.bold()).foregroundStyle(.secondary)
-            Picker(label, selection: Binding(
+            if showSides {
+                Text(side).font(.caption.bold()).foregroundStyle(.secondary)
+            }
+            Picker(GestureAction.title(action), selection: Binding(
                 get: { slot.function },
                 set: { code in Task { await device.setKeyFunction(slot, function: code) } }
             )) {
-                ForEach(options) { Text($0.title).tag($0.code) }
+                ForEach(options.suggested) { Text($0.title).tag($0.code) }
+                if !options.more.isEmpty {
+                    Section("More functions (may not be supported)") {
+                        ForEach(options.more) { Text($0.title).tag($0.code) }
+                    }
+                }
             }
             .labelsHidden()
             .frame(width: 170)

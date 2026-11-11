@@ -31,11 +31,12 @@ When the app first talks to your earbuds, macOS asks for **Bluetooth** access. C
 ## Connect your earbuds
 
 Pair the earbuds with your Mac in **System Settings → Bluetooth**, then connect them.
-Buds Control lives in the menu bar (the earbuds icon). It finds compatible earbuds
-automatically and links up whenever they connect to the Mac.
+Buds Control lives in the menu bar (the earbuds icon) and the Dock. It finds compatible
+earbuds automatically and links up whenever they connect to the Mac.
 
 Click the menu-bar icon for battery levels and the dual-connection switch. Choose
-**Settings…** for gestures, connected devices and firmware versions.
+**Settings…** (or click the Dock icon) for gestures, connected devices and firmware versions.
+To keep the app out of the Dock, turn off **Show in Dock** under **General** in Settings.
 
 ## Compatibility
 

@@ -74,12 +74,27 @@ public final class BudsDevice: Identifiable {
         linkState = .disconnected
     }
 
+    /// Number of visible views that want fresher data (e.g. the settings window).
+    @ObservationIgnored private var liveViewers = 0
+
+    /// Call when a view showing live state appears or disappears. While any are visible the
+    /// connected-device list is re-read every 15 s, as a fallback for earbuds that don't push
+    /// host changes.
+    public func setLiveUpdates(_ visible: Bool) {
+        liveViewers = max(0, liveViewers + (visible ? 1 : -1))
+        if visible { Task { await refreshHosts() } }
+    }
+
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                await self?.refreshBattery()
+                try? await Task.sleep(for: .seconds(15))
+                guard let self else { return }
+                tick += 1
+                if tick % 4 == 0 { await self.refreshBattery() }
+                if self.liveViewers > 0 { await self.refreshHosts() }
             }
         }
     }
@@ -123,12 +138,32 @@ public final class BudsDevice: Identifiable {
 
     func refreshHosts() async {
         guard supports(Command.getMultiConnect) else { return }
-        if let d = try? await request(Command.getMultiConnect) { hosts = Parse.multiConnect(d) }
+        if let d = try? await request(Command.getMultiConnect) { setHosts(Parse.multiConnect(d)) }
     }
+
+    /// Models disagree on the MAC byte order. The entry flagged as "this device" is the Mac, so
+    /// compare it with the Mac's own Bluetooth address and use whichever order matches.
+    private func setHosts(_ list: [ConnectedHost]) {
+        var list = list
+        if let mine = IOBluetoothHostController.default()?.addressAsString()?
+            .uppercased().replacingOccurrences(of: "-", with: ":"),
+           let me = list.first(where: \.isThisDevice),
+           me.address != mine, me.addressAsSent == mine {
+            list = list.map { var h = $0; swap(&h.address, &h.addressAsSent); return h }
+        }
+        hosts = list
+    }
+
+    /// Hosts connected right now (the full list also contains pairing history).
+    public var connectedHosts: [ConnectedHost] { hosts.filter(\.isConnected) }
+
+    /// Battery components in display order (left, right, case, then anything else).
+    public var batteryComponents: [BatteryLevel] { battery.sorted { $0.side < $1.side } }
 
     private func subscribeToEvents() async {
         guard let raw = try? await request(Command.getNotificationCapability) else { return }
         let events = Parse.idList(raw)
+        PacketLog.note("supported events: \(events.map { String(format: "0x%02X", $0) })")
         guard !events.isEmpty else { return }
         if supports(Command.registerMultiNotification) {
             _ = try? await request(Command.registerMultiNotification, [UInt8(events.count)] + events)
@@ -206,6 +241,9 @@ public final class BudsDevice: Identifiable {
         case 2:
             let update = Parse.earStatus(data)
             if !update.isEmpty { earStatus = update }
+        case 6:
+            // Multi-connect state changed; same layout as the 0x0112 response.
+            setHosts(Parse.multiConnect(data))
         default:
             break
         }
