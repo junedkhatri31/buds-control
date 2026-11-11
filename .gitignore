@@ -1,0 +1,9 @@
+.build/
+build/
+dist/
+re/
+tools/probe
+tools/BudsProbe.app/
+tools/probe.out
+.DS_Store
+.swiftpm/
